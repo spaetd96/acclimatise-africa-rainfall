@@ -31,6 +31,20 @@ pip install earthkit-data polytope-client covjsonkit
 | `polytope-client` | Low-level REST API client for advanced control |
 | `covjsonkit` | Handling CoverageJSON format output |
 
+### Register the Environment as a Jupyter Kernel
+
+To make the `destine` environment available as a kernel in Jupyter, register it:
+
+```bash
+python -m ipykernel install --user --name destine --display-name "Python 3.11 (destine)"
+```
+
+Verify it appears:
+
+```bash
+jupyter kernelspec list | grep destine
+```
+
 > **Note**: The `desp-authentication.py` script (Step 3) additionally requires `lxml`. Install it
 > together with the other packages:
 > ```bash

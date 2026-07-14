@@ -7,20 +7,24 @@ Supports ICON, IFS-FESOM, and IFS-NEMO models with configurable temporal,
 spatial, and variable selection.
 
 Usage Examples:
-    # Download ICON control simulation precipitation for one day
-    python download_destine.py --model ICON --activity control \
-        --experiment control-1950 --date 20200102 --param 228228
+    # Download ICON control simulation surface pressure for one day
+    python download_destine.py --model ICON --experiment cont \
+        --date 19900102 --param 134
 
     # Download IFS-FESOM projections for multiple days
-    python download_destine.py --model IFS-FESOM --activity projections \
-        --experiment SSP3-7.0 --date 20500601 --end-date 20500605 \
-        --param 228228/167 --time 0000/0600/1200/1800 \
+    python download_destine.py --model IFS-FESOM --experiment SSP3-7.0 \
+        --date 20200601 --end-date 20200605 \
+        --param 134/165/166 --time 0000/0600/1200/1800 \
         --output ./data/fesom_proj
 
     # Download with custom request keys
-    python download_destine.py --model ICON --activity control \
-        --experiment control-1950 --date 20200102 --param 134 \
-        --request-key stream=clte --request-key generation=3
+    python download_destine.py --model ICON --experiment hist \
+        --date 20000615 --param 134 \
+        --request-key stream=clte --request-key generation=2
+
+    # Use parameter short names
+    python download_destine.py --model IFS-NEMO --experiment SSP3-7.0 \
+        --date 20200102 --param tp/2t
 
 Requirements:
     conda activate destine
@@ -36,10 +40,13 @@ from typing import List, Optional, Dict, Any
 
 # ---- Configuration ----
 
-POLYTOPE_ADDRESS = "polytope.mn5.apps.dte.destination-earth.eu"
+# Server addresses per model family
+# ICON and IFS-FESOM -> LUMI  |  IFS-NEMO -> MN5
+LUMI_ADDRESS = "polytope.lumi.apps.dte.destination-earth.eu"
+MN5_ADDRESS  = "polytope.mn5.apps.dte.destination-earth.eu"
 COLLECTION = "destination-earth"
 
-# Default request template — most keys are standard across all Climate DT data
+# Default request template - most keys are standard across all Climate DT data
 DEFAULT_REQUEST = {
     "class": "d1",
     "dataset": "climate-dt",
@@ -48,6 +55,20 @@ DEFAULT_REQUEST = {
     "resolution": "standard",
     "stream": "clte",
     "type": "fc",
+}
+
+# Map model -> correct Polytope server address
+MODEL_ADDRESS = {
+    "ICON":       LUMI_ADDRESS,
+    "IFS-FESOM":  LUMI_ADDRESS,
+    "IFS-NEMO":   MN5_ADDRESS,
+}
+
+# Map experiment -> correct activity keyword
+EXPERIMENT_ACTIVITY = {
+    "hist":      "baseline",
+    "cont":      "baseline",
+    "SSP3-7.0":  "projections",
 }
 
 # Parameter code reference
@@ -63,9 +84,31 @@ PARAM_CODES = {
 }
 
 
+def get_address(model: str) -> str:
+    """Return the correct Polytope server address for a given model."""
+    return MODEL_ADDRESS.get(model, LUMI_ADDRESS)
+
+
+def get_activity(experiment: str) -> str:
+    """Return the correct activity keyword for a given experiment."""
+    return EXPERIMENT_ACTIVITY.get(experiment, "projections")
+
+
+def safe_len(data, max_sample: int = 100) -> int:
+    """Count fields in an earthkit-data result, even if __len__ is missing."""
+    try:
+        return len(data)
+    except TypeError:
+        n = 0
+        for _ in data:
+            n += 1
+            if n >= max_sample:
+                return max_sample
+        return n
+
+
 def build_request(
     model: str,
-    activity: str,
     experiment: str,
     date: str,
     param: str,
@@ -81,12 +124,12 @@ def build_request(
     ----------
     model : str
         Climate model: 'ICON', 'IFS-FESOM', 'IFS-NEMO'
-    activity : str
-        'control' or 'projections'
     experiment : str
-        Experiment name: 'control-1950', 'historical', 'SSP3-7.0', etc.
+        Experiment name: 'cont' (control), 'hist' (historical), 'SSP3-7.0' (projections)
     date : str
         Date in YYYYMMDD format.
+        'cont'/'hist' experiments typically use 1990-2014 dates,
+        'SSP3-7.0' uses 2020-2050 dates.
     param : str
         Parameter code(s), slash-separated, e.g. '134' or '228228/167'.
         Can also use short names: 'tp' -> '228228'.
@@ -112,7 +155,7 @@ def build_request(
 
     request = {
         **DEFAULT_REQUEST,
-        "activity": activity,
+        "activity": get_activity(experiment),
         "model": model,
         "experiment": experiment,
         "date": date,
@@ -175,8 +218,12 @@ def download_data(
     try:
         import earthkit.data
 
-        print(f"Downloading from Polytope...")
-        print(f"  Model:      {request.get('model', 'N/A')}")
+        model = request.get("model", "ICON")
+        address = get_address(model)
+
+        print("Downloading from Polytope...")
+        print(f"  Server:     {address}")
+        print(f"  Model:      {model}")
         print(f"  Activity:   {request.get('activity', 'N/A')}")
         print(f"  Experiment: {request.get('experiment', 'N/A')}")
         print(f"  Date:       {request.get('date', 'N/A')}")
@@ -190,11 +237,11 @@ def download_data(
             "polytope",
             COLLECTION,
             request,
-            address=POLYTOPE_ADDRESS,
+            address=address,
             stream=stream,
         )
 
-        print(f"✓ Download successful! Retrieved {len(data)} fields.")
+        print(f"Download successful - retrieved {safe_len(data)} fields.")
         return True
 
     except ImportError:
@@ -203,7 +250,7 @@ def download_data(
               file=sys.stderr)
         return False
     except Exception as e:
-        print(f"✗ Download failed: {e}", file=sys.stderr)
+        print(f"Download failed: {e}", file=sys.stderr)
         print("Check your authentication (~/.polytopeapirc) and request parameters.",
               file=sys.stderr)
         return False
@@ -239,7 +286,10 @@ def download_low_level(
     try:
         from polytope.api import Client
 
-        kwargs = {"address": POLYTOPE_ADDRESS}
+        model = request.get("model", "ICON")
+        address = get_address(model)
+
+        kwargs = {"address": address}
         if email and api_key:
             kwargs["user_email"] = email
             kwargs["user_key"] = api_key
@@ -251,7 +301,7 @@ def download_low_level(
 
         print(f"Downloading via polytope-client to {output_dir}...")
         files = client.retrieve(COLLECTION, request, output_dir)
-        print(f"✓ Downloaded {len(files)} file(s):")
+        print(f"Downloaded {len(files)} file(s):")
         for f in files:
             print(f"  {f}")
         return True
@@ -261,7 +311,7 @@ def download_low_level(
         print("Install with: pip install polytope-client", file=sys.stderr)
         return False
     except Exception as e:
-        print(f"✗ Download failed: {e}", file=sys.stderr)
+        print(f"Download failed: {e}", file=sys.stderr)
         return False
 
 
@@ -270,7 +320,9 @@ def parse_key_value_pairs(pairs: List[str]) -> Dict[str, str]:
     result = {}
     for pair in pairs:
         if "=" not in pair:
-            raise ValueError(f"Invalid key=value pair: '{pair}'. Expected format: key=value")
+            raise ValueError(
+                f"Invalid key=value pair: '{pair}'. Expected format: key=value"
+            )
         key, value = pair.split("=", 1)
         result[key.strip()] = value.strip()
     return result
@@ -283,27 +335,37 @@ def main():
         epilog="""
 Examples:
   # Single date, single parameter
-  %(prog)s --model ICON --activity control --experiment control-1950 \\
-           --date 20200102 --param 228228
+  %(prog)s --model ICON --experiment cont --date 19900102 --param 134
 
   # Date range with multiple parameters
-  %(prog)s --model IFS-FESOM --activity projections \\
-           --experiment SSP3-7.0 --date 20500601 --end-date 20500630 \\
+  %(prog)s --model IFS-FESOM --experiment SSP3-7.0 \\
+           --date 20200601 --end-date 20200630 \\
            --param tp/2t --time 0000/0600/1200/1800
 
   # Use short parameter names
-  %(prog)s --model ICON --activity control --experiment control-1950 \\
-           --date 20200102 --param tp/10u/10v
+  %(prog)s --model ICON --experiment hist --date 20000615 --param tp/10u/10v
 
   # Override request keys
-  %(prog)s --model ICON --activity projections --experiment historical \\
-           --date 20000115 --param tp --request-key generation=3 \\
-           --request-key resolution=high
+  %(prog)s --model ICON --experiment SSP3-7.0 --date 20200615 \\
+           --param tp --request-key generation=2 \\
+           --request-key resolution=standard
 
   # Use low-level polytope-client
-  %(prog)s --model IFS-FESOM --activity projections \\
-           --experiment SSP3-7.0 --date 20500101 --param 134 \\
-           --use-client
+  %(prog)s --model IFS-FESOM --experiment SSP3-7.0 \\
+           --date 20200101 --param 134 --use-client
+
+  # Dry-run: print request without downloading
+  %(prog)s --model IFS-NEMO --experiment hist --date 20000615 \\
+           --param 134 --dry-run
+
+Experiment names:
+  cont      = control simulation (activity=baseline)
+  hist      = historical simulation (activity=baseline)
+  SSP3-7.0  = future projections (activity=projections)
+
+Server mapping:
+  ICON, IFS-FESOM  -> LUMI (polytope.lumi.apps.dte.destination-earth.eu)
+  IFS-NEMO         -> MN5  (polytope.mn5.apps.dte.destination-earth.eu)
 
 Parameter short names:
   sp=134 (surface pressure), 10u=165, 10v=166, 2t=167,
@@ -318,13 +380,8 @@ Parameter short names:
         help="Climate model to query"
     )
     parser.add_argument(
-        "--activity", required=True,
-        choices=["control", "projections"],
-        help="Simulation activity type"
-    )
-    parser.add_argument(
         "--experiment", required=True,
-        help="Experiment name (e.g., control-1950, historical, SSP3-7.0)"
+        help="Experiment name: cont (control), hist (historical), SSP3-7.0 (projections)"
     )
     parser.add_argument(
         "--date", required=True,
@@ -370,15 +427,15 @@ Parameter short names:
         "--request-key", action="append", default=[],
         metavar="KEY=VALUE",
         help="Additional request key-value pair (can be used multiple times). "
-             "Example: --request-key generation=3 --request-key stream=clte"
+             "Example: --request-key generation=2 --request-key stream=clte"
     )
     parser.add_argument(
         "--email",
-        help="DestinE Platform email (for polytope-client, optional if ~/.polytopeapirc exists)"
+        help="DestinE Platform email (for polytope-client)"
     )
     parser.add_argument(
         "--api-key",
-        help="DestinE Platform API key (for polytope-client, optional if ~/.polytopeapirc exists)"
+        help="DestinE Platform API key (for polytope-client)"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -404,19 +461,21 @@ Parameter short names:
     else:
         dates = [args.date]
 
-    print(f"{'='*60}")
-    print(f"DestinE Climate DT Data Download")
-    print(f"{'='*60}")
+    print("=" * 60)
+    print("DestinE Climate DT Data Download")
+    print("=" * 60)
+    print(f"Model:      {args.model}")
+    print(f"Experiment: {args.experiment}")
+    print(f"Server:     {get_address(args.model)}")
     print(f"Dates to download: {len(dates)} day(s)")
     print()
 
     success_count = 0
     fail_count = 0
 
-    for day in dates:
+    for idx, day in enumerate(dates, start=1):
         request = build_request(
             model=args.model,
-            activity=args.activity,
             experiment=args.experiment,
             date=day,
             param=args.param,
@@ -427,12 +486,12 @@ Parameter short names:
         )
 
         if args.dry_run:
-            print(f"\n--- Request for {day} ---")
+            print(f"--- Request for {day} ---")
             for key, value in sorted(request.items()):
                 print(f"  {key}: {value}")
             continue
 
-        print(f"\n--- Processing {day} ({dates.index(day) + 1}/{len(dates)}) ---")
+        print(f"--- Processing {day} ({idx}/{len(dates)}) ---")
 
         if args.use_client:
             ok = download_low_level(
@@ -454,10 +513,13 @@ Parameter short names:
             fail_count += 1
 
     # Summary
-    print(f"\n{'='*60}")
-    print(f"Summary: {success_count} succeeded, {fail_count} failed "
-          f"(out of {len(dates)} day(s))")
-    print(f"{'='*60}")
+    print()
+    print("=" * 60)
+    print(
+        f"Summary: {success_count} succeeded, {fail_count} failed "
+        f"(out of {len(dates)} day(s))"
+    )
+    print("=" * 60)
 
     if args.dry_run:
         print("\nThis was a dry run. Remove --dry-run to actually download data.")
