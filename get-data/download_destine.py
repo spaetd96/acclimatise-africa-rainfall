@@ -94,17 +94,18 @@ def get_activity(experiment: str) -> str:
     return EXPERIMENT_ACTIVITY.get(experiment, "projections")
 
 
-def safe_len(data, max_sample: int = 100) -> int:
-    """Count fields in an earthkit-data result, even if __len__ is missing."""
+def safe_len(data) -> int:
+    """Count fields in an earthkit-data result, even for GribData (no __len__/__iter__)."""
     try:
         return len(data)
     except TypeError:
-        n = 0
-        for _ in data:
-            n += 1
-            if n >= max_sample:
-                return max_sample
-        return n
+        pass
+    # GribData: no __len__, no __iter__ — count via to_xarray()
+    try:
+        ds = data.to_xarray()
+        return sum(ds[var].size for var in ds.data_vars)
+    except Exception:
+        return 1  # at least we have data
 
 
 def build_request(
