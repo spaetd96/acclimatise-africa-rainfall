@@ -238,7 +238,6 @@ The [polytope-examples](https://github.com/destination-earth-digital-twins/polyt
 
 | Notebook | Location | Description |
 |----------|----------|-------------|
-| `browse_destine_data.ipynb` | `get-data/` | Interactive browse & download for ICON, IFS-FESOM, IFS-NEMO |
 | `03_lazy_browse_portfolio.ipynb` | `get-data/` | Monthly catalogue (from polytope-examples) |
 
 Additional notebooks available online:
