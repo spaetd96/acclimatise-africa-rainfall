@@ -1,0 +1,37 @@
+# DestinE Climate DT — Python dependencies
+# Install: pip install -r requirements.txt
+# Requires: conda environment with python=3.11
+
+# Core: Polytope data access
+earthkit-data>=0.13,<2
+polytope-client>=0.7
+covjsonkit>=0.2
+zarr>=2.18,<3
+numcodecs<0.16
+
+# Data & analysis
+xarray>=2023
+pandas>=2.0
+numpy>=1.24
+cfgrib>=0.9
+netcdf4>=1.6
+
+# Visualisation
+matplotlib>=3.7
+cartopy>=0.21
+healpy>=1.17
+earthkit-geo>=1.0
+
+# Notebook support
+jupyter>=1.0
+ipykernel>=6
+
+# Optional: GIS & machine learning (from upstream polytope-examples)
+# rioxarray
+# rasterio
+# scikit-learn
+# xgboost
+# h3
+# kaleido
+# conflator
+# python-dotenv

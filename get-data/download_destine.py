@@ -17,10 +17,9 @@ Usage Examples:
         --param 134/165/166 --time 0000/0600/1200/1800 \
         --output ./data/fesom_proj
 
-    # Download with custom request keys
-    python download_destine.py --model ICON --experiment hist \
-        --date 20000615 --param 134 \
-        --request-key stream=clte --request-key generation=2
+    # Download monthly data (clmn stream)
+    python download_destine.py --model IFS-FESOM --experiment hist \
+        --date 20100601 --param avg_2t --data-stream clmn
 
     # Use parameter short names
     python download_destine.py --model IFS-NEMO --experiment SSP3-7.0 \
@@ -28,7 +27,7 @@ Usage Examples:
 
 Requirements:
     conda activate destine
-    pip install earthkit-data polytope-client covjsonkit
+    pip install -r requirements.txt
 """
 
 import argparse
@@ -71,8 +70,10 @@ EXPERIMENT_ACTIVITY = {
     "SSP3-7.0":  "projections",
 }
 
-# Parameter code reference
+# Parameter code reference — numeric codes for clte stream,
+# shortNames for clmn stream (see destine_portfolio.py for full catalogue)
 PARAM_CODES = {
+    # clte hourly instantaneous
     "sp": "134",         # Surface pressure
     "10u": "165",        # 10m U wind
     "10v": "166",        # 10m V wind
@@ -80,7 +81,16 @@ PARAM_CODES = {
     "2d": "168",         # 2m dewpoint
     "tp": "228228",      # Total precipitation
     "msl": "151",        # Mean sea level pressure
-    "skt": "235",        # Surface temperature (skin)
+    "skt": "235",        # Skin temperature
+    # clmn monthly means (use with --data-stream clmn)
+    "avg_2t": "avg_2t",          # 2m temperature (monthly mean)
+    "avg_tprate": "avg_tprate",  # total precipitation rate (monthly mean)
+    "avg_sp": "avg_sp",          # surface pressure (monthly mean)
+    "avg_msl": "avg_msl",        # MSL pressure (monthly mean)
+    "avg_tcc": "avg_tcc",        # total cloud cover (monthly mean)
+    "avg_10u": "avg_10u",        # 10m U wind (monthly mean)
+    "avg_10v": "avg_10v",        # 10m V wind (monthly mean)
+    "avg_skt": "avg_skt",        # skin temperature (monthly mean)
 }
 
 
@@ -97,15 +107,9 @@ def get_activity(experiment: str) -> str:
 def safe_len(data) -> int:
     """Count fields in an earthkit-data result, even for GribData (no __len__/__iter__)."""
     try:
-        return len(data)
-    except TypeError:
-        pass
-    # GribData: no __len__, no __iter__ — count via to_xarray()
-    try:
-        ds = data.to_xarray()
-        return sum(ds[var].size for var in ds.data_vars)
+        return data.to_numpy().size
     except Exception:
-        return 1  # at least we have data
+        return 1
 
 
 def build_request(
@@ -133,11 +137,12 @@ def build_request(
         'SSP3-7.0' uses 2020-2050 dates.
     param : str
         Parameter code(s), slash-separated, e.g. '134' or '228228/167'.
-        Can also use short names: 'tp' -> '228228'.
+        Can also use short names: 'tp' -> '228228', 'avg_2t' -> 'avg_2t'.
     time : str
         Time(s) in HHMM format, e.g. '0000' or '0000/0300/.../2100'.
     levtype : str
-        'sfc' (surface), 'pl' (pressure levels), 'hl' (height levels).
+        'sfc' (surface), 'pl' (pressure levels), 'hl' (height levels),
+        'sol' (soil/snow), 'o2d' (2D ocean), 'o3d' (3D ocean).
     realization : str
         Ensemble realization number.
     extra_keys : dict, optional
@@ -242,13 +247,12 @@ def download_data(
             stream=stream,
         )
 
-        print(f"Download successful - retrieved {safe_len(data)} fields.")
+        print(f"Download successful - retrieved {safe_len(data)} values.")
         return True
 
     except ImportError:
         print("ERROR: earthkit-data is not installed.", file=sys.stderr)
-        print("Install with: pip install earthkit-data polytope-client covjsonkit",
-              file=sys.stderr)
+        print("Install with: pip install -r requirements.txt", file=sys.stderr)
         return False
     except Exception as e:
         print(f"Download failed: {e}", file=sys.stderr)
@@ -343,6 +347,10 @@ Examples:
            --date 20200601 --end-date 20200630 \\
            --param tp/2t --time 0000/0600/1200/1800
 
+  # Monthly data (clmn stream)
+  %(prog)s --model IFS-FESOM --experiment hist \\
+           --date 20100601 --param avg_2t --data-stream clmn
+
   # Use short parameter names
   %(prog)s --model ICON --experiment hist --date 20000615 --param tp/10u/10v
 
@@ -368,9 +376,13 @@ Server mapping:
   ICON, IFS-FESOM  -> LUMI (polytope.lumi.apps.dte.destination-earth.eu)
   IFS-NEMO         -> MN5  (polytope.mn5.apps.dte.destination-earth.eu)
 
-Parameter short names:
+Parameter short names (hourly clte):
   sp=134 (surface pressure), 10u=165, 10v=166, 2t=167,
   2d=168, tp=228228 (precipitation), msl=151, skt=235
+
+Parameter short names (monthly clmn, use --data-stream clmn):
+  avg_2t (2m temperature), avg_tprate (precipitation rate),
+  avg_sp (surface pressure), avg_msl (MSLP), avg_tcc (cloud cover)
         """,
     )
 
@@ -405,8 +417,14 @@ Parameter short names:
     )
     parser.add_argument(
         "--levtype", default="sfc",
-        choices=["sfc", "pl", "hl"],
+        choices=["sfc", "pl", "hl", "sol", "o2d", "o3d"],
         help="Level type (default: sfc)"
+    )
+    parser.add_argument(
+        "--data-stream", default="clte",
+        choices=["clte", "clmn"],
+        help="Data stream: clte (hourly instantaneous, default) or "
+             "clmn (monthly means)"
     )
     parser.add_argument(
         "--realization", default="1",
@@ -452,6 +470,10 @@ Parameter short names:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Inject data stream if not already in extra_keys (overrides DEFAULT_REQUEST)
+    if "stream" not in extra_keys and args.data_stream:
+        extra_keys["stream"] = args.data_stream
+
     # Generate date list
     if args.end_date:
         try:
@@ -468,6 +490,7 @@ Parameter short names:
     print(f"Model:      {args.model}")
     print(f"Experiment: {args.experiment}")
     print(f"Server:     {get_address(args.model)}")
+    print(f"Data stream:{args.data_stream}")
     print(f"Dates to download: {len(dates)} day(s)")
     print()
 

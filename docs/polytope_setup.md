@@ -17,22 +17,41 @@ conda create -n destine python=3.11 jupyter jupyterlab -y
 conda activate destine
 ```
 
-## Step 2: Install Polytope Dependencies
+## Step 2: Install Dependencies
 
-Install the core packages via pip:
+### Quick Install (recommended)
 
 ```bash
-pip install earthkit-data polytope-client covjsonkit "zarr<3"
+pip install -r requirements.txt
 ```
 
-| Package | Purpose |
-|---------|---------|
-| `earthkit-data` | High-level library for data access, recommended for most use cases |
-| `polytope-client` | Low-level REST API client for advanced control |
-| `covjsonkit` | Handling CoverageJSON format output |
-| `zarr` (v2) | Zarr format backend for xarray (required by lazy browse notebook) |
+### Manual Install
 
-> **Important:** The lazy browse notebook (`03_lazy_browse_portfolio.ipynb`) requires **zarr v2** (`zarr<3`). zarr v3 does not support the legacy `MutableMapping` store interface used by `PolytopeZarrStore`.
+If you prefer to install packages individually:
+
+```bash
+pip install earthkit-data polytope-client covjsonkit "zarr>=2.18,<3" "numcodecs<0.16"
+```
+
+Then install visualisation and analysis packages:
+
+```bash
+conda install -c conda-forge matplotlib cartopy healpy xarray pandas cfgrib netcdf4 -y
+pip install earthkit-geo
+```
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `earthkit-data` | ≥0.13 | High-level Polytope data access |
+| `polytope-client` | ≥0.7 | Low-level REST API client |
+| `covjsonkit` | ≥0.2 | CoverageJSON format support |
+| `zarr` | ≥2.18, <3 | Zarr v2 backend for xarray (required by `PolytopeZarrStore`) |
+| `numcodecs` | <0.16 | Codec for zarr string arrays |
+| `healpy` | ≥1.17 | HEALPix grid visualisation (all Climate DT fields are HEALPix) |
+| `earthkit-geo` | ≥1.0 | Geographic feature extraction (country polygons, etc.) |
+| `cfgrib` | ≥0.9 | GRIB to xarray conversion |
+
+> **Important:** `zarr` must be **v2** (`zarr<3`). zarr v3 does not support the legacy `MutableMapping` store interface used by `PolytopeZarrStore`.
 
 ### Register the Environment as a Jupyter Kernel
 
@@ -48,22 +67,10 @@ Verify it appears:
 jupyter kernelspec list | grep destine
 ```
 
-> **Note**: The `desp-authentication.py` script (Step 3) additionally requires `lxml`. Install it
-> together with the other packages:
+> **Note**: The `desp-authentication.py` script (Step 3) additionally requires `lxml`:
 > ```bash
-> pip install earthkit-data polytope-client covjsonkit "zarr<3" lxml
+> pip install lxml
 > ```
-
-### Optional: Full Installation
-
-For the lazy browse notebook (`03_lazy_browse_portfolio.ipynb`) and plotting in `browse_destine_data.ipynb`, install the additional dependencies:
-
-```bash
-conda install -c conda-forge matplotlib cartopy healpy xarray pandas -y
-pip install earthkit-geo
-```
-
-For an even richer setup, follow the instructions in the [polytope-examples repository](https://github.com/destination-earth-digital-twins/polytope-examples/tree/main/climate-dt).
 
 ## Step 3: Set Up Authentication
 
@@ -155,10 +162,18 @@ If successful, this retrieves surface temperature and wind data from the IFS-NEM
 - **Package conflicts**: If using an existing environment, consider creating a fresh one as described above.
 - **`zarr` version**: The `03_lazy_browse_portfolio.ipynb` notebook requires **zarr v2** (`zarr<3`). zarr v3 does not support the legacy `MutableMapping` store interface used by `PolytopeZarrStore`. If you installed zarr v3 by mistake, downgrade with `pip install "zarr<3"`.
 - **Lazy browse notebook errors**: If `store.open()` fails with `TypeError: Unsupported type for store_like`, either `zarr` is not installed or the wrong version (v3) is present. Install/repair with `pip install "zarr<3"`.
-- **Plotting errors in `browse_destine_data.ipynb`**: The ICON/IFS-FESOM data uses an unstructured HEALPix grid. Standard xarray `.plot()` will fail on this data. Use `ax.scatter()` with the `latitude`/`longitude` coordinates instead, or use the healpy-based approach from `03_lazy_browse_portfolio.ipynb`.
+- **Plots show no data / all NaN**: This is the most common issue. Use the built-in diagnostics:
+  1. Run `store.verify()` (in `03_lazy_browse_portfolio.ipynb`) or the diagnostics cell (Section 6 in `browse_destine_data.ipynb`)
+  2. Check that `~/.polytopeapirc` exists and is valid
+  3. Verify the `model` + `levtype` + `experiment` combination exists for the requested time
+  4. For `PolytopeZarrStore`, check the printed log for `⚠ fetch` errors — these indicate failed requests
+- **Plotting wrong visuals**: Climate DT data is on the HEALPix grid. Use `healpy.mollview(field, nest=True, flip='geo')` for correct global rendering. Avoid `ax.scatter()` or xarray `.plot()` on HEALPix data — they don't handle the nested pixel ordering correctly.
+- **`earthkit-data` API changes**: If `list(data)` or iteration over GribData fails, the data access layer uses `to_xarray()` as fallback.  Report issues with the earthkit-data version.
 
 ## Next Steps
 
-- See [Polytope Usage Guide](polytope_usage.md) for detailed request syntax and examples.
-- See [Data Catalogue](data_catalogue.md) for available datasets and variables.
-- Browse the [polytope-examples repository](https://github.com/destination-earth-digital-twins/polytope-examples/tree/main/climate-dt) for ready-to-run notebooks.
+- Run `03_lazy_browse_portfolio.ipynb` for lazy monthly data access with `PolytopeZarrStore`
+- Run `browse_destine_data.ipynb` for hourly GRIB data via earthkit-data
+- See [Polytope Usage Guide](polytope_usage.md) for detailed request syntax and examples
+- See [Data Catalogue](data_catalogue.md) for available datasets and variables
+- Browse the [polytope-examples repository](https://github.com/destination-earth-digital-twins/polytope-examples/tree/main/climate-dt) for ready-to-run notebooks

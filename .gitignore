@@ -110,3 +110,6 @@ dmypy.json
 
 # Earthkit data cache
 .earthkit-data/
+
+# Cline
+.clinerules

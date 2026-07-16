@@ -643,64 +643,132 @@ class PolytopeZarrStore(MutableMapping):
 
     def _split_batch(self, var_name, dims, indices, batch_pos,
                      batch_indices, chunk_shape, data):
-        """Split a multi-field earthkit response into per-chunk cache entries."""
+        """Split a multi-field earthkit response into per-chunk cache entries.
+
+        Handles both iterable (earthkit < 1.0) and non-iterable
+        (earthkit-data >= 1.0) GribData objects.
+        """
         n_cells = 1
         for s in chunk_shape:
             n_cells *= s
 
-        fields = list(data)
+        # earthkit-data >= 1.0: GribData is not iterable — use to_xarray()
+        # to inspect individual fields via the time dimension.
+        try:
+            fields = list(data)
+        except TypeError:
+            fields = None
 
         # ── Time dimension: match fields by metadata ────────────────────
         if self._batch_dim == "time" and dims[batch_pos] == "time":
-            # Build lookup: time-key tuple → time-axis index
-            time_lookup = {}
-            if self._frequency == "hourly":
-                meta_keys = ("date", "time")
-                for bi in batch_indices:
-                    ts = pd.Timestamp(self._coords["time"][bi])
-                    time_lookup[(ts.strftime("%Y%m%d"), ts.strftime("%H%M"))] = bi
-            else:
-                meta_keys = ("year", "month")
-                for bi in batch_indices:
-                    ts = pd.Timestamp(self._coords["time"][bi])
-                    time_lookup[(ts.year, ts.month)] = bi
+            if fields is not None:
+                # Build lookup: time-key tuple → time-axis index
+                time_lookup = {}
+                if self._frequency == "hourly":
+                    meta_keys = ("date", "time")
+                    for bi in batch_indices:
+                        ts = pd.Timestamp(self._coords["time"][bi])
+                        time_lookup[(ts.strftime("%Y%m%d"), ts.strftime("%H%M"))] = bi
+                else:
+                    meta_keys = ("year", "month")
+                    for bi in batch_indices:
+                        ts = pd.Timestamp(self._coords["time"][bi])
+                        time_lookup[(ts.year, ts.month)] = bi
 
-            matched = set()
-            for field in fields:
-                try:
-                    vals = tuple(
-                        int(field.metadata(k)) if k in ("year", "month")
-                        else str(field.metadata(k)).zfill(4) if k == "time"
-                        else str(field.metadata(k))
-                        for k in meta_keys)
-                except Exception:
-                    continue
-                key_tuple = vals
-                if key_tuple in time_lookup and key_tuple not in matched:
-                    bi = time_lookup[key_tuple]
-                    matched.add(key_tuple)
+                matched = set()
+                for field in fields:
+                    try:
+                        vals = tuple(
+                            int(field.metadata(k)) if k in ("year", "month")
+                            else str(field.metadata(k)).zfill(4) if k == "time"
+                            else str(field.metadata(k))
+                            for k in meta_keys)
+                    except Exception:
+                        continue
+                    key_tuple = vals
+                    if key_tuple in time_lookup and key_tuple not in matched:
+                        bi = time_lookup[key_tuple]
+                        matched.add(key_tuple)
+                        trial = list(indices)
+                        trial[batch_pos] = bi
+                        key = f"{var_name}/{self._chunk_key_for_indices(trial)}"
+                        values = field.to_numpy().flatten().astype(np.float32)
+                        if values.size == n_cells:
+                            self._cache[key] = values.tobytes()
+                        else:
+                            self._cache[key] = np.full(
+                                n_cells, np.nan, dtype=np.float32).tobytes()
+
+                # Fill any unmatched batch indices with NaN
+                for bi in batch_indices:
                     trial = list(indices)
                     trial[batch_pos] = bi
                     key = f"{var_name}/{self._chunk_key_for_indices(trial)}"
-                    values = field.to_numpy().flatten().astype(np.float32)
-                    if values.size == n_cells:
-                        self._cache[key] = values.tobytes()
+                    if key not in self._cache:
+                        self._cache[key] = np.full(
+                            n_cells, np.nan, dtype=np.float32).tobytes()
+                return
+
+            # Non-iterable GribData: split via xarray time dimension.
+            # Monthly data has varying step lengths (28/30/31 days) which
+            # creates extra hypercube dims; drop_dims="step" collapses them.
+            try:
+                if self._frequency == "monthly":
+                    ds = data.to_xarray(drop_dims="step")
+                else:
+                    ds = data.to_xarray()
+                da = ds[list(ds.data_vars)[0]]
+                # Resolve time coordinate name
+                time_coord_name = None
+                for candidate in ("forecast_reference_time", "valid_time",
+                                  "time", "datetimes"):
+                    if candidate in da.coords:
+                        time_coord_name = candidate
+                        break
+                if time_coord_name is None:
+                    raise KeyError("No time coordinate found in response")
+
+                times = pd.DatetimeIndex(da.coords[time_coord_name].values)
+                for bi in batch_indices:
+                    ts = pd.Timestamp(self._coords["time"][bi])
+                    trial = list(indices)
+                    trial[batch_pos] = bi
+                    key = f"{var_name}/{self._chunk_key_for_indices(trial)}"
+                    # Find matching time index in response
+                    match = None
+                    if self._frequency == "hourly":
+                        match = times.get_indexer(
+                            [ts], method="nearest", tolerance="1h")
+                    else:
+                        # Monthly: match by year-month
+                        mask = (times.year == ts.year) & (times.month == ts.month)
+                        idxs = np.where(mask)[0]
+                        match = [idxs[0]] if len(idxs) > 0 else [-1]
+                    if match is not None and match[0] >= 0:
+                        vals = da.isel(
+                            {time_coord_name: match[0]}
+                        ).values.ravel().astype(np.float32)
+                        if vals.size == n_cells:
+                            self._cache[key] = vals.tobytes()
+                        else:
+                            self._cache[key] = np.full(
+                                n_cells, np.nan, dtype=np.float32).tobytes()
                     else:
                         self._cache[key] = np.full(
                             n_cells, np.nan, dtype=np.float32).tobytes()
-
-            # Fill any unmatched batch indices with NaN
-            for bi in batch_indices:
-                trial = list(indices)
-                trial[batch_pos] = bi
-                key = f"{var_name}/{self._chunk_key_for_indices(trial)}"
-                if key not in self._cache:
-                    self._cache[key] = np.full(
-                        n_cells, np.nan, dtype=np.float32).tobytes()
+            except Exception as efs:
+                print(f"  ⚠ split batch via xarray failed for {var_name}: {efs}")
+                for bi in batch_indices:
+                    trial = list(indices)
+                    trial[batch_pos] = bi
+                    key = f"{var_name}/{self._chunk_key_for_indices(trial)}"
+                    if key not in self._cache:
+                        self._cache[key] = np.full(
+                            n_cells, np.nan, dtype=np.float32).tobytes()
             return
 
         # ── Non-time dimensions: ordered matching ───────────────────────
-        if len(fields) == len(batch_indices):
+        if fields is not None and len(fields) == len(batch_indices):
             for bi, field in zip(batch_indices, fields):
                 trial = list(indices)
                 trial[batch_pos] = bi
@@ -821,6 +889,117 @@ class PolytopeZarrStore(MutableMapping):
     def clear_cache(self):
         """Free cached data chunks."""
         self._cache.clear()
+
+    def verify(self):
+        """Make a single small Polytope request to test connectivity.
+
+        Fetches one month of one variable from the first model and checks
+        that data is returned with the expected shape and contains valid
+        (non-NaN) values.
+
+        Returns
+        -------
+        dict
+            Status info: ``{"ok": True/False, "message": str, "details": dict}``
+        """
+        import earthkit.data
+        var_names = list(self._variables.keys())
+        if not var_names:
+            return {"ok": False, "message": "No variables defined in store"}
+        var_name = var_names[0]
+
+        # Pick the first model (or climate for storylines)
+        if "model" in self._coords:
+            model_val = str(self._coords["model"][0])
+        elif "climate" in self._coords:
+            model_val = str(self._coords["climate"][0])
+        else:
+            model_val = None
+
+        # Pick first time
+        time_idx = 0
+        ts = pd.Timestamp(self._coords["time"][time_idx])
+        time_fields = self._time_to_fields(ts)
+
+        # Build minimal request
+        request = dict(self._base_request)
+        request["param"] = var_name
+        if model_val is not None:
+            request["model"] = model_val
+        for f in self._time_fields:
+            request[f] = time_fields[f]
+
+        # Resolve address
+        address = self._address
+        if isinstance(address, dict) and model_val is not None:
+            address = address.get(model_val, list(address.values())[0])
+
+        nside = getattr(self, "nside", 128)
+        n_expected = 12 * nside ** 2
+
+        try:
+            with _quiet_polytope_loggers():
+                data = earthkit.data.from_source(
+                    "polytope", self._collection, request,
+                    address=address, stream=False)
+            arr = data.to_numpy().flatten()
+            n_valid = np.sum(~np.isnan(arr))
+            n_nan = np.sum(np.isnan(arr))
+            pct_valid = 100.0 * n_valid / arr.size if arr.size > 0 else 0.0
+
+            shape_ok = arr.size == n_expected
+            has_valid = n_valid > 0
+
+            details = {
+                "variable": var_name,
+                "model": model_val,
+                "time": str(ts),
+                "nside": nside,
+                "expected_cells": n_expected,
+                "got_cells": int(arr.size),
+                "shape_ok": shape_ok,
+                "valid_pixels": int(n_valid),
+                "nan_pixels": int(n_nan),
+                "pct_valid": float(f"{pct_valid:.1f}"),
+                "value_range": (
+                    float(np.nanmin(arr)), float(np.nanmax(arr))
+                ) if has_valid else (None, None),
+            }
+
+            if shape_ok and has_valid:
+                return {
+                    "ok": True,
+                    "message": f"✓ Connected: {var_name} for {model_val} at {ts} "
+                               f"— {n_valid:,} of {arr.size:,} pixels valid "
+                               f"(range {details['value_range'][0]:.1f}–{details['value_range'][1]:.1f})",
+                    "details": details,
+                }
+            elif shape_ok and not has_valid:
+                return {
+                    "ok": False,
+                    "message": f"✗ Data returned but ALL {arr.size:,} pixels are NaN. "
+                               f"Check parameter '{var_name}' exists for model '{model_val}', "
+                               f"levtype '{request.get('levtype')}', stream '{request.get('stream')}'.",
+                    "details": details,
+                }
+            else:
+                return {
+                    "ok": False,
+                    "message": f"✗ Size mismatch: got {arr.size:,} pixels, "
+                               f"expected {n_expected:,} (nside={nside}).",
+                    "details": details,
+                }
+        except Exception as e:
+            return {
+                "ok": False,
+                "message": f"✗ Polytope request failed: {e}",
+                "details": {
+                    "variable": var_name,
+                    "model": model_val,
+                    "time": str(ts),
+                    "error": str(e),
+                },
+            }
 
     def __repr__(self):
         dims = ", ".join(f"{k}={v}" for k, v in self._dim_sizes.items())
