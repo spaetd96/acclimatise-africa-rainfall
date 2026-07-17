@@ -12,9 +12,12 @@ acclimatise-africa-rainfall/
 │   ├── polytope_usage.md               # Polytope usage with ICON/IFS-FESOM examples
 │   └── data_catalogue.md               # Available DestinE Climate DT datasets
 ├── get-data/                           # Data access tools
-│   ├── browse_destine_data.ipynb       # Jupyter notebook for data browsing
-│   └── download_destine.py            # Generic CLI download script
+│   ├── 03_lazy_browse_portfolio.ipynb  # Jupyter notebook for lazy data browsing via PolytopeZarrStore
+│   ├── polytope_zarr.py                # Virtual Zarr store backed by Polytope
+│   ├── destine_portfolio.py            # DestinE Climate DT variable catalogues
+│   └── download_destine.py             # Generic CLI download script
 └── analysis/                           # Analysis scripts and notebooks
+    └── Sahel_rainfall_trends.ipynb     # Sahel rainfall change + trend (ICON vs IFS-FESOM, 1990–2050)
 ```
 
 ## Quick Start
