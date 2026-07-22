@@ -188,14 +188,15 @@ python get-data/download_destine.py --model ICON --experiment hist \
 
 ### Hourly `clte` stream parameters
 
-| Short name | Numeric code | Description |
-|------------|-------------|-------------|
+| Short name | Code | Description |
+|------------|------|-------------|
 | `sp` | `134` | Surface pressure |
 | `10u` | `165` | 10 m U wind component |
 | `10v` | `166` | 10 m V wind component |
 | `2t` | `167` | 2 m temperature |
 | `2d` | `168` | 2 m dewpoint temperature |
-| `tp` | `228228` | Total precipitation |
+| `tp` | `avg_tprate` (via short-name) | Total precipitation rate |
+| `avg_tprate` | `avg_tprate` | Total precipitation rate |
 | `msl` | `151` | Mean sea level pressure |
 | `skt` | `235` | Skin temperature |
 

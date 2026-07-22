@@ -88,18 +88,18 @@ EXPERIMENT_ACTIVITY = {
 # Parameter code reference — numeric codes for clte stream,
 # shortNames for clmn stream (see destine_portfolio.py for full catalogue)
 PARAM_CODES = {
-    # clte hourly instantaneous
-    "sp": "134",         # Surface pressure
-    "10u": "165",        # 10m U wind
-    "10v": "166",        # 10m V wind
-    "2t": "167",         # 2m temperature
-    "2d": "168",         # 2m dewpoint
-    "tp": "228228",      # Total precipitation
-    "msl": "151",        # Mean sea level pressure
-    "skt": "235",        # Skin temperature
+    # clte hourly instantaneous / mean
+    "sp": "134",         # Surface pressure (clte instantaneous)
+    "10u": "165",        # 10m U wind (clte instantaneous)
+    "10v": "166",        # 10m V wind (clte instantaneous)
+    "2t": "167",         # 2m temperature (clte instantaneous)
+    "2d": "168",         # 2m dewpoint (clte instantaneous)
+    "tp": "avg_tprate",  # Total precipitation rate (alias for avg_tprate)
+    "avg_tprate": "avg_tprate",  # Total precipitation rate
+    "msl": "151",        # Mean sea level pressure (clte instantaneous)
+    "skt": "235",        # Skin temperature (clte instantaneous)
     # clmn monthly means (use with --data-stream clmn)
     "avg_2t": "avg_2t",          # 2m temperature (monthly mean)
-    "avg_tprate": "avg_tprate",  # total precipitation rate (monthly mean)
     "avg_sp": "avg_sp",          # surface pressure (monthly mean)
     "avg_msl": "avg_msl",        # MSL pressure (monthly mean)
     "avg_tcc": "avg_tcc",        # total cloud cover (monthly mean)
@@ -187,7 +187,7 @@ def build_request(
         'SSP3-7.0' uses 2020-2050 dates.
     param : str
         Parameter code(s), slash-separated, e.g. '134' or '228228/167'.
-        Can also use short names: 'tp' -> '228228', 'avg_2t' -> 'avg_2t'.
+        Can also use short names: 'tp' -> 'avg_tprate', 'avg_2t' -> 'avg_2t'.
     time : str
         Time(s) in HHMM format, e.g. '0000' or '0000/0300/.../2100'.
     levtype : str
@@ -526,7 +526,7 @@ Server mapping:
 
 Parameter short names (hourly clte):
   sp=134 (surface pressure), 10u=165, 10v=166, 2t=167,
-  2d=168, tp=228228 (precipitation), msl=151, skt=235
+  2d=168, tp=avg_tprate (precipitation rate), msl=151, skt=235
 
 Parameter short names (monthly clmn, use --data-stream clmn):
   avg_2t (2m temperature), avg_tprate (precipitation rate),
