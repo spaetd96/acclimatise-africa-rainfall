@@ -25,6 +25,19 @@ Usage Examples:
     python download_destine.py --model IFS-NEMO --experiment SSP3-7.0 \
         --date 20200102 --param tp/2t
 
+    # Crop to bounding box (south, west, north, east)
+    python download_destine.py --model ICON --experiment hist \
+        --date 20000615 --param tp --bbox 5,44,10,49
+
+    # Download hourly data aggregated to daily means
+    python download_destine.py --model ICON --experiment hist \
+        --date 20000601 --end-date 20000630 --param tp --daily
+
+    # Combine bounding box + daily aggregation
+    python download_destine.py --model ICON --experiment hist \
+        --date 20000601 --end-date 20000630 --param tp \
+        --bbox -10,-20,25,55 --daily --output ./data/sahel_daily
+
 Requirements:
     conda activate destine
     pip install -r requirements.txt
@@ -34,7 +47,9 @@ import argparse
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
+
+import numpy as np
 
 
 # ---- Configuration ----
@@ -93,6 +108,9 @@ PARAM_CODES = {
     "avg_skt": "avg_skt",        # skin temperature (monthly mean)
 }
 
+# Default 24-hour time string used when --daily is requested
+ALL_HOURS = "/".join(f"{h:02d}00" for h in range(24))
+
 
 def get_address(model: str) -> str:
     """Return the correct Polytope server address for a given model."""
@@ -112,6 +130,37 @@ def safe_len(data) -> int:
         return 1
 
 
+def parse_bbox(bbox_str: str) -> Dict[str, Any]:
+    """Parse a 'south,west,north,east' string into a Polytope feature dict.
+
+    Parameters
+    ----------
+    bbox_str : str
+        Comma-separated coordinates: south,west,north,east (degrees).
+
+    Returns
+    -------
+    dict
+        Polytope ``feature`` sub-dict for a bounding-box request.
+
+    Example
+    -------
+    >>> parse_bbox("5,44,10,49")
+    {'type': 'boundingbox', 'points': [[10, 44], [5, 49]]}
+    """
+    parts = [float(x.strip()) for x in bbox_str.split(",")]
+    if len(parts) != 4:
+        raise ValueError(
+            f"Bounding box must have 4 values (south,west,north,east), "
+            f"got {len(parts)}: {bbox_str}"
+        )
+    south, west, north, east = parts
+    return {
+        "type": "boundingbox",
+        "points": [[north, west], [south, east]],
+    }
+
+
 def build_request(
     model: str,
     experiment: str,
@@ -121,6 +170,7 @@ def build_request(
     levtype: str = "sfc",
     realization: str = "1",
     extra_keys: Optional[Dict[str, str]] = None,
+    bbox: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build a Polytope request dictionary.
@@ -147,6 +197,9 @@ def build_request(
         Ensemble realization number.
     extra_keys : dict, optional
         Additional key-value pairs to add/override in the request.
+    bbox : str, optional
+        Bounding box as 'south,west,north,east' in degrees.
+        Injects a ``feature`` key for server-side spatial subsetting.
 
     Returns
     -------
@@ -173,6 +226,9 @@ def build_request(
 
     if extra_keys:
         request.update(extra_keys)
+
+    if bbox:
+        request["feature"] = parse_bbox(bbox)
 
     return request
 
@@ -203,7 +259,7 @@ def download_data(
     request: Dict[str, Any],
     output_dir: str = "./data",
     stream: bool = False,
-) -> bool:
+) -> Optional[Any]:
     """
     Download data from Polytope using earthkit-data.
 
@@ -218,8 +274,8 @@ def download_data(
 
     Returns
     -------
-    bool
-        True if successful, False otherwise.
+    earthkit.data source object or None
+        The downloaded data object on success, or None on failure.
     """
     try:
         import earthkit.data
@@ -247,18 +303,19 @@ def download_data(
             stream=stream,
         )
 
-        print(f"Download successful - retrieved {safe_len(data)} values.")
-        return True
+        n_vals = safe_len(data)
+        print(f"Download successful - retrieved {n_vals} values.")
+        return data
 
     except ImportError:
         print("ERROR: earthkit-data is not installed.", file=sys.stderr)
         print("Install with: pip install -r requirements.txt", file=sys.stderr)
-        return False
+        return None
     except Exception as e:
         print(f"Download failed: {e}", file=sys.stderr)
         print("Check your authentication (~/.polytopeapirc) and request parameters.",
               file=sys.stderr)
-        return False
+        return None
 
 
 def download_low_level(
@@ -320,6 +377,84 @@ def download_low_level(
         return False
 
 
+def aggregate_daily(
+    data: Any,
+    output_dir: str,
+    param: str,
+    date_str: str,
+) -> str:
+    """Aggregate hourly data to daily means and save as netCDF.
+
+    Converts the earthkit-data GRIB object to xarray, averages across
+    all time steps within each day, and writes a compressed netCDF file.
+
+    Parameters
+    ----------
+    data : earthkit.data source
+        Downloaded hourly GRIB data object.
+    output_dir : str
+        Directory to save the netCDF file.
+    param : str
+        Parameter short name (used in the output filename).
+    date_str : str
+        Date string YYYYMMDD (used in the output filename).
+
+    Returns
+    -------
+    str
+        Path to the saved netCDF file.
+
+    Raises
+    ------
+    ImportError
+        If xarray is not installed.
+    """
+    try:
+        import xarray as xr
+        import pandas as pd
+    except ImportError:
+        print("ERROR: xarray and pandas are required for daily aggregation.",
+              file=sys.stderr)
+        print("Install with: pip install -r requirements.txt", file=sys.stderr)
+        raise
+
+    print(f"  Aggregating hourly data to daily means for {date_str} ...")
+
+    # Convert GRIB to xarray
+    ds = data.to_xarray()
+
+    # Squeeze singleton GRIB dimensions (number, step, etc.)
+    _grib_singletons = ("number", "step", "steps")
+    squeeze_dims = [d for d in _grib_singletons if d in ds.dims and ds.sizes[d] == 1]
+    if squeeze_dims:
+        ds = ds.squeeze(squeeze_dims).drop_vars(squeeze_dims, errors="ignore")
+
+    # Rename common time-like dims to "time"
+    _dim_renames = {"datetimes": "time", "forecast_reference_time": "time",
+                    "valid_time": "time"}
+    renames = {k: v for k, v in _dim_renames.items() if k in ds.dims}
+    if renames:
+        ds = ds.rename(renames)
+
+    # Ensure time coordinate is proper datetime64
+    if "time" in ds.coords and not np.issubdtype(ds["time"].dtype, np.datetime64):
+        ds["time"] = pd.to_datetime(ds["time"].values, utc=True).tz_localize(None)
+
+    # Resample to daily means
+    if "time" in ds.dims and ds.sizes["time"] > 1:
+        ds_daily = ds.resample(time="1D").mean()
+    else:
+        ds_daily = ds
+
+    # Save as netCDF
+    out_fname = f"{param}_{date_str}_daily.nc"
+    out_path = os.path.join(output_dir, out_fname)
+    encoding = {var: {"zlib": True, "complevel": 4} for var in ds_daily.data_vars}
+    ds_daily.to_netcdf(out_path, encoding=encoding)
+    print(f"  Saved daily netCDF: {out_path}")
+    return out_path
+
+
 def parse_key_value_pairs(pairs: List[str]) -> Dict[str, str]:
     """Parse 'key=value' strings into a dictionary."""
     result = {}
@@ -350,6 +485,19 @@ Examples:
   # Monthly data (clmn stream)
   %(prog)s --model IFS-FESOM --experiment hist \\
            --date 20100601 --param avg_2t --data-stream clmn
+
+  # Crop to a bounding box (south,west,north,east)
+  %(prog)s --model ICON --experiment hist \\
+           --date 20000615 --param tp --bbox 5,44,10,49
+
+  # Daily aggregation from hourly data
+  %(prog)s --model ICON --experiment hist \\
+           --date 20000601 --end-date 20000615 --param tp --daily
+
+  # Bounding box + daily aggregation
+  %(prog)s --model ICON --experiment hist \\
+           --date 20000601 --end-date 20000615 --param tp \\
+           --bbox -10,-20,25,55 --daily
 
   # Use short parameter names
   %(prog)s --model ICON --experiment hist --date 20000615 --param tp/10u/10v
@@ -461,7 +609,32 @@ Parameter short names (monthly clmn, use --data-stream clmn):
         help="Print the request dictionary without downloading"
     )
 
+    # ---- New spatial / temporal options ----
+    parser.add_argument(
+        "--bbox",
+        help="Bounding box in degrees: south,west,north,east. "
+             "Example: '5,44,10,49' for Horn of Africa. "
+             "Injects a 'feature' key for server-side spatial subsetting."
+    )
+    parser.add_argument(
+        "--daily", action="store_true",
+        help="Aggregate hourly (clte) data to daily means. "
+             "Forces --data-stream to clte and --time to all 24 hours if "
+             "not explicitly overridden. Output saved as netCDF."
+    )
+
     args = parser.parse_args()
+
+    # ---- Validate --daily constraints ----
+    if args.daily:
+        if args.data_stream != "clte":
+            print("NOTE: --daily forces --data-stream to clte (hourly data required "
+                  "for daily aggregation).", file=sys.stderr)
+            args.data_stream = "clte"
+        if args.use_client:
+            print("ERROR: --daily is not compatible with --use-client.",
+                  file=sys.stderr)
+            sys.exit(1)
 
     # Parse extra request keys
     try:
@@ -473,6 +646,13 @@ Parameter short names (monthly clmn, use --data-stream clmn):
     # Inject data stream if not already in extra_keys (overrides DEFAULT_REQUEST)
     if "stream" not in extra_keys and args.data_stream:
         extra_keys["stream"] = args.data_stream
+
+    # ---- Handle --daily time default ----
+    time_arg = args.time
+    if args.daily and args.time == "0000":
+        # User did not override --time; default to all 24 hours
+        time_arg = ALL_HOURS
+        print(f"Using all 24 hours for daily aggregation: {ALL_HOURS}")
 
     # Generate date list
     if args.end_date:
@@ -487,11 +667,15 @@ Parameter short names (monthly clmn, use --data-stream clmn):
     print("=" * 60)
     print("DestinE Climate DT Data Download")
     print("=" * 60)
-    print(f"Model:      {args.model}")
-    print(f"Experiment: {args.experiment}")
-    print(f"Server:     {get_address(args.model)}")
-    print(f"Data stream:{args.data_stream}")
+    print(f"Model:       {args.model}")
+    print(f"Experiment:  {args.experiment}")
+    print(f"Server:      {get_address(args.model)}")
+    print(f"Data stream: {args.data_stream}")
     print(f"Dates to download: {len(dates)} day(s)")
+    if args.bbox:
+        print(f"Bounding box: {args.bbox}")
+    if args.daily:
+        print(f"Daily aggregation: enabled")
     print()
 
     success_count = 0
@@ -503,10 +687,11 @@ Parameter short names (monthly clmn, use --data-stream clmn):
             experiment=args.experiment,
             date=day,
             param=args.param,
-            time=args.time,
+            time=time_arg,
             levtype=args.levtype,
             realization=args.realization,
             extra_keys=extra_keys if extra_keys else None,
+            bbox=args.bbox,
         )
 
         if args.dry_run:
@@ -524,17 +709,32 @@ Parameter short names (monthly clmn, use --data-stream clmn):
                 email=args.email,
                 api_key=args.api_key,
             )
+            if ok:
+                success_count += 1
+            else:
+                fail_count += 1
         else:
-            ok = download_data(
+            data = download_data(
                 request,
                 output_dir=args.output,
                 stream=args.stream,
             )
 
-        if ok:
+            if data is None:
+                fail_count += 1
+                continue
+
             success_count += 1
-        else:
-            fail_count += 1
+
+            # ---- Daily aggregation ----
+            if args.daily:
+                try:
+                    aggregate_daily(data, args.output, args.param, day)
+                except Exception as e:
+                    print(f"Daily aggregation failed for {day}: {e}",
+                          file=sys.stderr)
+                    # Don't count as download failure — data was retrieved
+                    print("  (download succeeded but aggregation failed)")
 
     # Summary
     print()
