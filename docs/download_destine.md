@@ -93,6 +93,67 @@ tp_20000602_daily.nc
 tp_20000630_daily.nc
 ```
 
+### End-to-end example: Horn of Africa daily precipitation (2000–2009)
+
+Download total precipitation for the Horn of Africa (lat 5–10°N, lon 44–49°E),
+aggregated to daily means, for both ICON and IFS-FESOM historical simulations
+over the full 2000–2009 decade at standard resolution (the default).
+The `--output` directory is created automatically for each model.
+
+To use high resolution, add `--request-key resolution=high` to each command.
+
+> **Note on resolution**: The default is `standard` (HEALPix nside=128,
+> ~110 km).  High resolution uses nside=1024 (~4.4 km for baseline/projections,
+> ~9 km for storylines) but produces much larger downloads.  Switch with
+> `--request-key resolution=high`.
+
+```bash
+conda activate destine
+
+# ICON — Horn of Africa, 2000–2009, daily tp
+python get-data/download_destine.py \
+    --model ICON \
+    --experiment hist \
+    --date 20000101 --end-date 20091231 \
+    --param tp \
+    --bbox="5,44,10,49" \
+    --daily \
+    --output ./data/horn_of_africa/ICON
+
+# IFS-FESOM — Horn of Africa, 2000–2009, daily tp
+python get-data/download_destine.py \
+    --model IFS-FESOM \
+    --experiment hist \
+    --date 20000101 --end-date 20091231 \
+    --param tp \
+    --bbox="5,44,10,49" \
+    --daily \
+    --output ./data/horn_of_africa/IFS-FESOM
+```
+
+This produces one compressed netCDF file per day per model:
+
+```
+data/horn_of_africa/ICON/
+    tp_20000101_daily.nc
+    tp_20000102_daily.nc
+    ...
+    tp_20091231_daily.nc
+data/horn_of_africa/IFS-FESOM/
+    tp_20000101_daily.nc
+    tp_20000102_daily.nc
+    ...
+    tp_20091231_daily.nc
+```
+
+> **Tip**: Use `--dry-run` first to inspect the request dictionaries before
+> starting the full download.
+```bash
+python get-data/download_destine.py --model ICON --experiment hist \
+    --date 20000101 --end-date 20000102 --param tp \
+    --bbox="5,44,10,49" --daily --dry-run
+```
+
 ## Full option reference
 
 ### Required arguments
@@ -116,7 +177,7 @@ tp_20000630_daily.nc
 | `--output`, `-o` | `./data` | Output directory |
 | `--stream` | off | Stream data directly (no local cache) |
 | `--use-client` | off | Use low-level `polytope-client` instead of `earthkit-data` |
-| `--request-key` | — | Extra key=value for the Polytope request (repeatable) |
+| `--request-key` | — | Extra key=value for the Polytope request (repeatable).  Use `resolution=standard` (default) or `resolution=high`. |
 | `--email` | — | DestinE Platform email (for `--use-client`) |
 | `--api-key` | — | DestinE Platform API key (for `--use-client`) |
 | `--dry-run` | off | Print the request dict without downloading |
