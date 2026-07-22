@@ -25,9 +25,9 @@ Usage Examples:
     python download_destine.py --model IFS-NEMO --experiment SSP3-7.0 \
         --date 20200102 --param tp/2t
 
-    # Crop to bounding box (south, west, north, east)
+    # Crop to bounding box (south, west, north, east) — use = syntax
     python download_destine.py --model ICON --experiment hist \
-        --date 20000615 --param tp --bbox 5,44,10,49
+        --date 20000615 --param tp --bbox="5,44,10,49"
 
     # Download hourly data aggregated to daily means
     python download_destine.py --model ICON --experiment hist \
@@ -36,7 +36,7 @@ Usage Examples:
     # Combine bounding box + daily aggregation
     python download_destine.py --model ICON --experiment hist \
         --date 20000601 --end-date 20000630 --param tp \
-        --bbox -10,-20,25,55 --daily --output ./data/sahel_daily
+        --bbox="-10,-20,25,55" --daily --output ./data/sahel_daily
 
 Requirements:
     conda activate destine

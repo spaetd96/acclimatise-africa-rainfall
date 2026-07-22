@@ -30,10 +30,11 @@ python get-data/download_destine.py --model ICON --experiment hist \
 ## Bounding-box cropping (`--bbox`)
 
 Crop downloaded data to a geographic region using server-side spatial
-subsetting.  The argument is four comma-separated values:
+subsetting.  The argument is four comma-separated values.  Use the `=` form to avoid
+argparse parsing negative numbers as flags:
 
 ```
---bbox south,west,north,east
+--bbox="south,west,north,east"
 ```
 
 All coordinates are in **decimal degrees**.  This injects a `feature` key
@@ -44,9 +45,9 @@ into the Polytope request, so Polytope only returns cells inside the box.
 ```bash
 # Horn of Africa (lat 5–10°N, lon 44–49°E)
 python get-data/download_destine.py --model ICON --experiment hist \
-    --date 20000615 --param tp --bbox 5,44,10,49
+    --date 20000615 --param tp --bbox="5,44,10,49"
 
-# Sahel (lat 10°S–25°N, lon 20°W–55°E) — use = for negative values
+# Sahel (lat 10°S–25°N, lon 20°W–55°E)
 python get-data/download_destine.py --model IFS-FESOM --experiment SSP3-7.0 \
     --date 20400601 --param tp --bbox="-10,-20,25,55"
 ```

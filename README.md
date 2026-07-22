@@ -43,7 +43,7 @@ Launch Jupyter and open the browsing notebook:
 
 ```bash
 conda activate destine
-jupyter lab get-data/browse_destine_data.ipynb
+jupyter lab get-data/03_lazy_browse_portfolio.ipynb
 ```
 
 ### 3. Download Data
@@ -62,9 +62,9 @@ python get-data/download_destine.py --model IFS-FESOM --experiment SSP3-7.0 \
     --date 20500601 --end-date 20500630 \
     --param tp/2t --time 0000/0600/1200/1800
 
-# Crop to a bounding box (south,west,north,east)
+# Crop to a bounding box (south,west,north,east) — use = syntax
 python get-data/download_destine.py --model ICON --experiment hist \
-    --date 20000615 --param tp --bbox 5,44,10,49
+    --date 20000615 --param tp --bbox="5,44,10,49"
 
 # Download hourly data aggregated to daily means
 python get-data/download_destine.py --model ICON --experiment hist \
@@ -83,6 +83,7 @@ See **[Download Script Reference](docs/download_destine.md)** for full option do
 |----------|-------------|
 | [Polytope Setup](docs/polytope_setup.md) | How to set up the `destine` conda environment, install packages, and configure authentication for Polytope. |
 | [Polytope Usage](docs/polytope_usage.md) | How to use Polytope with `earthkit-data` and `polytope-client`, including request structure, model-specific examples for ICON and IFS-FESOM, and common parameter codes. |
+| [Download Script](docs/download_destine.md) | Full reference for `download_destine.py` CLI: all options, bounding-box cropping, daily aggregation, parameter codes. |
 | [Data Catalogue](docs/data_catalogue.md) | Overview of available DestinE Climate DT datasets, key surface and pressure-level variables, and request templates for African rainfall analysis. |
 
 ## Climate Models Available
