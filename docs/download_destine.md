@@ -84,6 +84,27 @@ python get-data/download_destine.py --model ICON --experiment hist \
 | Output format | Compressed netCDF (`{param}_{date}_daily.nc`) |
 | Incompatible with | `--use-client`, `--data-stream clmn` |
 
+### Restart safety
+
+By default the script **skips dates whose daily netCDF file already exists**
+in the output directory.  This means you can safely interrupt (Ctrl‑C) and
+re‑run the same command — only missing days will be downloaded.
+
+Use `--force` to re‑download and overwrite everything.
+
+### File consolidation
+
+When the download period spans **more than 31 days**, the script
+automatically merges the daily files into larger netCDF files before exiting:
+
+| Span | Consolidation | Output file example |
+|------|--------------|---------------------|
+| > 365 days | **Yearly** | `tp_2000_Y_mean.nc`, `tp_2001_Y_mean.nc`, … |
+| 32–365 days | **Monthly** | `tp_200001_M_mean.nc`, `tp_200002_M_mean.nc`, … |
+| ≤ 31 days | None | Daily files kept as‑is |
+
+Daily files are deleted after merging so the output directory stays clean.
+
 ### Output file names
 
 ```
