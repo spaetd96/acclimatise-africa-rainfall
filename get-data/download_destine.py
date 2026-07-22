@@ -47,7 +47,7 @@ import argparse
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 
 import numpy as np
 

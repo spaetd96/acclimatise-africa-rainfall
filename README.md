@@ -10,6 +10,7 @@ acclimatise-africa-rainfall/
 ├── docs/                               # Detailed documentation
 │   ├── polytope_setup.md               # Step-by-step Polytope setup guide
 │   ├── polytope_usage.md               # Polytope usage with ICON/IFS-FESOM examples
+│   ├── download_destine.md             # CLI download script reference (all options)
 │   └── data_catalogue.md               # Available DestinE Climate DT datasets
 ├── get-data/                           # Data access tools
 │   ├── 03_lazy_browse_portfolio.ipynb  # Jupyter notebook for lazy data browsing via PolytopeZarrStore
@@ -17,7 +18,8 @@ acclimatise-africa-rainfall/
 │   ├── destine_portfolio.py            # DestinE Climate DT variable catalogues
 │   └── download_destine.py             # Generic CLI download script
 └── analysis/                           # Analysis scripts and notebooks
-    └── Sahel_rainfall_trends.ipynb     # Sahel rainfall change + trend (ICON vs IFS-FESOM, 1990–2050)
+    ├── sahel_rainfall_trends.ipynb     # Sahel rainfall change + trend (ICON vs IFS-FESOM, 1990–2050)
+    └── seasonality_hornofafrica.ipynb  # Horn of Africa seasonal cycle (hourly, bounding-box)
 ```
 
 ## Quick Start
@@ -51,25 +53,29 @@ Use the generic download script:
 ```bash
 conda activate destine
 
-# Download ICON precipitation data
-python get-data/download_destine.py \
-    --model ICON \
-    --activity control \
-    --experiment control-1950 \
-    --date 20200102 \
-    --param tp
+# Single date, single parameter
+python get-data/download_destine.py --model ICON --experiment hist \
+    --date 20000615 --param tp
 
-# Show what a request would look like (dry run)
-python get-data/download_destine.py \
-    --model IFS-FESOM \
-    --activity projections \
-    --experiment SSP3-7.0 \
-    --date 20500601 \
-    --end-date 20500630 \
-    --param tp/2t \
-    --time 0000/0600/1200/1800 \
-    --dry-run
+# Date range with multiple parameters and times
+python get-data/download_destine.py --model IFS-FESOM --experiment SSP3-7.0 \
+    --date 20500601 --end-date 20500630 \
+    --param tp/2t --time 0000/0600/1200/1800
+
+# Crop to a bounding box (south,west,north,east)
+python get-data/download_destine.py --model ICON --experiment hist \
+    --date 20000615 --param tp --bbox 5,44,10,49
+
+# Download hourly data aggregated to daily means
+python get-data/download_destine.py --model ICON --experiment hist \
+    --date 20000601 --end-date 20000615 --param tp --daily
+
+# Dry-run: print the request without downloading
+python get-data/download_destine.py --model IFS-FESOM --experiment SSP3-7.0 \
+    --date 20500601 --param tp --bbox="-10,-20,25,55" --daily --dry-run
 ```
+
+See **[Download Script Reference](docs/download_destine.md)** for full option documentation.
 
 ## Documentation
 
