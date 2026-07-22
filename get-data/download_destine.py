@@ -455,6 +455,96 @@ def aggregate_daily(
     return out_path
 
 
+def consolidate_daily_files(output_dir: str, param: str, start_date: str,
+                            end_date: str = None) -> List[str]:
+    """Merge daily netCDF files into monthly or yearly files, delete originals.
+
+    Decision logic:
+      - > 365 days span → yearly files  (one per year)
+      - > 31  days span → monthly files (one per month)
+      - ≤ 31  days      → leave daily files as-is
+
+    Parameters
+    ----------
+    output_dir : str
+        Directory containing the daily ``*_daily.nc`` files.
+    param : str
+        Parameter short name (used to match files).
+    start_date : str
+        Start date YYYYMMDD of the download period.
+    end_date : str, optional
+        End date YYYYMMDD of the download period.  If None, inferred from
+        ``start_date`` as a single day.
+
+    Returns
+    -------
+    list of str
+        Paths to the consolidated netCDF files (empty if span ≤ 31 days).
+    """
+    import glob
+    import xarray as xr
+    import pandas as pd
+
+    pattern = os.path.join(output_dir, f"{param}_*_daily.nc")
+    daily_files = sorted(glob.glob(pattern))
+    if not daily_files:
+        return []
+
+    n_days = len(daily_files)
+    if end_date is None:
+        end_date = start_date
+
+    t0 = datetime.strptime(start_date, "%Y%m%d")
+    t1 = datetime.strptime(end_date, "%Y%m%d")
+    span_days = (t1 - t0).days + 1
+
+    if span_days <= 31:
+        print(f"\n  Span ({span_days} days) ≤ 31 — keeping daily files as-is.")
+        return []
+
+    if span_days > 365:
+        freq_label = "Y"
+        freq_file = "%Y"
+        group_key = lambda f: os.path.basename(f)[len(f"{param}_"):][:4]  # YYYY
+    else:
+        freq_label = "M"
+        freq_file = "%Y%m"
+        group_key = lambda f: os.path.basename(f)[len(f"{param}_"):][:6]  # YYYYMM
+
+    # Group files
+    groups = {}
+    for f in daily_files:
+        key = group_key(f)
+        groups.setdefault(key, []).append(f)
+
+    print(f"\n  Consolidating {n_days} daily files into {len(groups)} "
+          f"{freq_label} files ...")
+
+    consolidated = []
+    for grp_key in sorted(groups.keys()):
+        fpaths = groups[grp_key]
+        out_fname = f"{param}_{grp_key}_{freq_label}_mean.nc"
+        out_path = os.path.join(output_dir, out_fname)
+
+        if len(fpaths) == 1:
+            os.rename(fpaths[0], out_path)
+            print(f"    Renamed {os.path.basename(fpaths[0])} → {out_fname}")
+        else:
+            ds = xr.open_mfdataset(fpaths, combine="by_coords")
+            encoding = {var: {"zlib": True, "complevel": 4}
+                        for var in ds.data_vars}
+            ds.to_netcdf(out_path, encoding=encoding)
+            print(f"    Merged {len(fpaths)} files → {out_fname}")
+            # Delete daily files
+            for fp in fpaths:
+                os.remove(fp)
+
+        consolidated.append(out_path)
+
+    print(f"  Consolidation complete — {len(consolidated)} {freq_label} file(s).")
+    return consolidated
+
+
 def parse_key_value_pairs(pairs: List[str]) -> Dict[str, str]:
     """Parse 'key=value' strings into a dictionary."""
     result = {}
@@ -622,6 +712,11 @@ Parameter short names (monthly clmn, use --data-stream clmn):
              "Forces --data-stream to clte and --time to all 24 hours if "
              "not explicitly overridden. Output saved as netCDF."
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-download and overwrite existing daily netCDF files. "
+             "By default, dates whose output file already exists are skipped."
+    )
 
     args = parser.parse_args()
 
@@ -702,6 +797,15 @@ Parameter short names (monthly clmn, use --data-stream clmn):
 
         print(f"--- Processing {day} ({idx}/{len(dates)}) ---")
 
+        # Skip if daily file already exists (unless --force)
+        if args.daily and not args.force:
+            out_fname = f"{args.param}_{day}_daily.nc"
+            out_path = os.path.join(args.output, out_fname)
+            if os.path.exists(out_path):
+                print(f"  Skipping — {out_fname} already exists (use --force to re-download)")
+                success_count += 1
+                continue
+
         if args.use_client:
             ok = download_low_level(
                 request,
@@ -735,6 +839,14 @@ Parameter short names (monthly clmn, use --data-stream clmn):
                           file=sys.stderr)
                     # Don't count as download failure — data was retrieved
                     print("  (download succeeded but aggregation failed)")
+
+    # ---- Consolidate daily files (if --daily and span > 31 days) ----
+    if args.daily and not args.dry_run and success_count > 0:
+        end_d = args.end_date if args.end_date else args.date
+        try:
+            consolidate_daily_files(args.output, args.param, args.date, end_d)
+        except Exception as e:
+            print(f"Consolidation failed: {e}", file=sys.stderr)
 
     # Summary
     print()

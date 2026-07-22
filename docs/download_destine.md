@@ -226,6 +226,36 @@ python get-data/download_destine.py --model ICON --experiment hist \
 | `ICON`, `IFS-FESOM` | `polytope.lumi.apps.dte.destination-earth.eu` |
 | `IFS-NEMO` | `polytope.mn5.apps.dte.destination-earth.eu` |
 
+## Running long downloads with tmux
+
+Multi-year downloads can take hours or days.  Use `tmux` to keep the
+download running after you disconnect from the server.
+
+```bash
+# 1. Start a new tmux session
+tmux new -s download
+
+# 2. Inside the session, activate your environment and start the download
+conda activate destine
+python get-data/download_destine.py --model ICON --experiment hist \
+    --date 20000101 --end-date 20091231 --param tp \
+    --bbox="5,44,10,49" --daily --output ./data/horn/ICON
+
+# 3. Detach from the session (press Ctrl-B, then D)
+#    The download keeps running in the background.
+
+# 4. Re-attach later to check progress
+tmux attach -t download
+
+# 5. (Optional) kill the session when done
+tmux kill-session -t download
+```
+
+> **Tip**: You can also pipe the output to a log file for later inspection:
+> ```bash
+> python get-data/download_destine.py ... 2>&1 | tee download_ICON.log
+> ```
+
 ## Troubleshooting
 
 ### Authentication errors
