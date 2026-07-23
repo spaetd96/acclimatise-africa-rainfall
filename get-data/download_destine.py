@@ -526,20 +526,44 @@ def consolidate_daily_files(output_dir: str, param: str, start_date: str,
         out_fname = f"{param}_{grp_key}_{freq_label}_mean.nc"
         out_path = os.path.join(output_dir, out_fname)
 
-        if len(fpaths) == 1:
-            os.rename(fpaths[0], out_path)
-            print(f"    Renamed {os.path.basename(fpaths[0])} → {out_fname}")
-        else:
-            ds = xr.open_mfdataset(fpaths, combine="by_coords")
-            encoding = {var: {"zlib": True, "complevel": 4}
-                        for var in ds.data_vars}
-            ds.to_netcdf(out_path, encoding=encoding)
-            print(f"    Merged {len(fpaths)} files → {out_fname}")
-            # Delete daily files
-            for fp in fpaths:
-                os.remove(fp)
+        try:
+            if len(fpaths) == 1:
+                os.rename(fpaths[0], out_path)
+                print(f"    Renamed {os.path.basename(fpaths[0])} → {out_fname}")
+            else:
+                # Open each file; if it lacks a 'time' dim, add one from
+                # the filename so concat works.  Use coords="minimal" so
+                # that HEALPix lat/lon coords (which differ per file) don't
+                # block the concat along time.
+                ds_list = []
+                for fp in fpaths:
+                    ds_i = xr.open_dataset(fp)
+                    # Ensure 'time' is a proper coordinate (not just a dim).
+                    # xr.concat requires the coord on all datasets.
+                    if "time" not in ds_i.coords:
+                        # Extract YYYYMMDD from filename (format: PARAM_YYYYMMDD_daily.nc)
+                        dt_str = os.path.basename(fp).split("_")[1]
+                        ts = pd.Timestamp(dt_str)
+                        if "time" in ds_i.dims:
+                            ds_i = ds_i.assign_coords(time=[ts])
+                        else:
+                            ds_i = ds_i.expand_dims(time=[ts])
+                    ds_list.append(ds_i)
+                ds = xr.concat(ds_list, dim="time", coords="minimal")
+                for ds_i in ds_list:
+                    ds_i.close()
+                encoding = {var: {"zlib": True, "complevel": 4}
+                            for var in ds.data_vars}
+                ds.to_netcdf(out_path, encoding=encoding)
+                print(f"    Merged {len(fpaths)} files → {out_fname}")
+                # Delete daily files
+                for fp in fpaths:
+                    os.remove(fp)
 
-        consolidated.append(out_path)
+            consolidated.append(out_path)
+        except Exception as e:
+            print(f"    ERROR merging {grp_key}: {e} — daily files not deleted",
+                  file=sys.stderr)
 
     print(f"  Consolidation complete — {len(consolidated)} {freq_label} file(s).")
     return consolidated
